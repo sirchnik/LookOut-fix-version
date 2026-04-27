@@ -86,7 +86,11 @@ export class TnefExtractor {
     filename = filename.split("\\").pop().split("/").pop();
 
     if (!content_type) {
-      content_type = "application/binary";
+      if (filename.endsWith(".pdf")) {
+        content_type = "application/pdf";
+      } else {
+        content_type = "application/binary";
+      }
     }
 
     // The data is a binary string, but we need an Uint8Array to not trigger utf8
