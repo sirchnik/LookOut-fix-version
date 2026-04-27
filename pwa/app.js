@@ -93,6 +93,27 @@ function hasAndroidShareSupport() {
   return isAndroidApp && bridge && typeof bridge.shareFiles === "function";
 }
 
+function getNormalizedFileName(file) {
+  if (file && file.name === "NaN.html") {
+    return "message.html";
+  }
+  return (file && file.name) || "attachment.bin";
+}
+
+function isFirstMessageHtmlFile(file, idx) {
+  if (idx !== 0) {
+    return false;
+  }
+  const name = getNormalizedFileName(file).toLowerCase();
+  return name === "message.html";
+}
+
+function getSelectedExtractedFiles() {
+  return extractedFiles
+    .filter((item) => item.selected)
+    .map((item) => item.file);
+}
+
 function updateShareAllButtonState() {
   if (!shareAllBtn) {
     return;
@@ -106,15 +127,20 @@ function updateShareAllButtonState() {
     return;
   }
 
-  const files = extractedFiles.map((item) => item.file);
+  const files = getSelectedExtractedFiles();
   shareAllBtn.disabled = files.length === 0 || !hasAndroidShareSupport();
+}
+
+function updateDownloadAllButtonState() {
+  const files = getSelectedExtractedFiles();
+  downloadAllBtn.disabled = files.length === 0;
 }
 
 function resetResults() {
   extractedFiles.forEach((item) => URL.revokeObjectURL(item.url));
   extractedFiles = [];
   resultsEl.innerHTML = "";
-  downloadAllBtn.disabled = true;
+  updateDownloadAllButtonState();
   updateShareAllButtonState();
 }
 
@@ -127,21 +153,26 @@ function renderResults(files) {
   }
 
   const frag = document.createDocumentFragment();
-  extractedFiles = files.map((file) => {
+  extractedFiles = files.map((file, idx) => {
     const url = URL.createObjectURL(file);
+    const normalizedName = getNormalizedFileName(file);
+    const shouldSelect = !isFirstMessageHtmlFile(file, idx);
 
     const li = document.createElement("li");
     li.className = "result-item";
 
+    const selectLabel = document.createElement("label");
+    selectLabel.className = "result-select";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = shouldSelect;
+    checkbox.setAttribute("aria-label", `Select ${normalizedName}`);
+    selectLabel.append(checkbox);
+
     const meta = document.createElement("div");
     meta.className = "result-meta";
     const name = document.createElement("strong");
-    if (file.name === "NaN.html") {
-      // TODO update also file struct
-      name.textContent = "message.html";
-    } else {
-      name.textContent = file.name || "attachment.bin";
-    }
+    name.textContent = normalizedName;
     const details = document.createElement("small");
     details.textContent = `${file.type || "application/octet-stream"} • ${formatBytes(file.size)}`;
     meta.append(name, details);
@@ -149,7 +180,7 @@ function renderResults(files) {
     const link = document.createElement("a");
     link.className = "download-link";
     link.href = url;
-    link.download = file.name || "attachment.bin";
+    link.download = normalizedName;
     link.textContent = "Download";
     link.addEventListener("click", async (event) => {
       if (!isAndroidApp) {
@@ -202,14 +233,22 @@ function renderResults(files) {
       actions.append(shareBtn);
     }
 
-    li.append(meta, actions);
+    li.append(selectLabel, meta, actions);
     frag.append(li);
 
-    return { file, url };
+    const entry = { file, url, selected: shouldSelect };
+
+    checkbox.addEventListener("change", (event) => {
+      entry.selected = Boolean(event.target.checked);
+      updateDownloadAllButtonState();
+      updateShareAllButtonState();
+    });
+
+    return entry;
   });
 
   resultsEl.append(frag);
-  downloadAllBtn.disabled = false;
+  updateDownloadAllButtonState();
   updateShareAllButtonState();
   setStatus(
     `Extracted ${files.length} attachment${files.length === 1 ? "" : "s"}.`,
@@ -342,10 +381,16 @@ async function shareFiles(files) {
 }
 
 async function downloadAll() {
+  const selectedFiles = getSelectedExtractedFiles();
+  if (!selectedFiles.length) {
+    setStatus("Select at least one attachment.", true);
+    return;
+  }
+
   if (isAndroidApp) {
     try {
-      for (const item of extractedFiles) {
-        await saveFileViaAndroid(item.file);
+      for (const file of selectedFiles) {
+        await saveFileViaAndroid(file);
       }
       return;
     } catch (error) {
@@ -354,10 +399,14 @@ async function downloadAll() {
     }
   }
 
-  extractedFiles.forEach((item, idx) => {
+  selectedFiles.forEach((file, idx) => {
     const a = document.createElement("a");
-    a.href = item.url;
-    a.download = item.file.name || `attachment-${idx + 1}.bin`;
+    const fileEntry = extractedFiles.find((item) => item.file === file);
+    if (!fileEntry) {
+      return;
+    }
+    a.href = fileEntry.url;
+    a.download = getNormalizedFileName(file) || `attachment-${idx + 1}.bin`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -427,7 +476,12 @@ downloadAllBtn.addEventListener("click", downloadAll);
 if (shareAllBtn) {
   shareAllBtn.addEventListener("click", async () => {
     try {
-      await shareFiles(extractedFiles.map((item) => item.file));
+      const selectedFiles = getSelectedExtractedFiles();
+      if (!selectedFiles.length) {
+        setStatus("Select at least one attachment.", true);
+        return;
+      }
+      await shareFiles(selectedFiles);
     } catch (error) {
       if (error && error.name === "AbortError") {
         return;

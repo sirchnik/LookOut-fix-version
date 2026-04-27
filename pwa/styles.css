@@ -200,6 +200,16 @@ button:disabled {
   animation: row-in 260ms ease-out;
 }
 
+.result-select {
+  display: flex;
+  align-items: center;
+}
+
+.result-select input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+}
+
 .result-meta {
   overflow-wrap: anywhere;
 }
