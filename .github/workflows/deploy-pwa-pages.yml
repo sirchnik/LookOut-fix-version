@@ -24,6 +24,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: TypeScript check
+        run: npm --prefix pwa run typecheck
+
       - name: Build PWA
         run: npm --prefix pwa run build
 

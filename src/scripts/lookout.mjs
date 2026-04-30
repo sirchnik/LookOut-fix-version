@@ -1,3 +1,4 @@
+//@ts-nocheck
 import { tnef_parse } from "/scripts/tnef.mjs";
 
 // Partially implements nsIInputStream.
@@ -86,11 +87,7 @@ export class TnefExtractor {
     filename = filename.split("\\").pop().split("/").pop();
 
     if (!content_type) {
-      if (filename.endsWith(".pdf")) {
-        content_type = "application/pdf";
-      } else {
-        content_type = "application/binary";
-      }
+      content_type = "application/binary";
     }
 
     // The data is a binary string, but we need an Uint8Array to not trigger utf8

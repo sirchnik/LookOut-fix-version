@@ -1,11 +1,39 @@
+// @ts-check
+
 import { TnefExtractor } from "../src/scripts/lookout.mjs";
 
-const fileInput = document.getElementById("fileInput");
-const downloadAllBtn = document.getElementById("downloadAllBtn");
-const shareAllBtn = document.getElementById("shareAllBtn");
-const statusEl = document.getElementById("status");
-const resultsEl = document.getElementById("results");
-const dropzone = document.getElementById("dropzone");
+/**
+ * @typedef {Object} Prefs
+ * @property {boolean} debug_enabled
+ * @property {boolean} attach_raw_mapi
+ * @property {boolean} disable_filename_character_set
+ */
+
+/** @typedef {{ file: File, url: string, selected: boolean }} ExtractedFile */
+/** @typedef {{ files?: FileSystemFileHandle[] }} LaunchParamsLike */
+/** @typedef {{ setConsumer(consumer: (launchParams: LaunchParamsLike) => void): void }} LaunchQueueLike */
+/** @typedef {{ openFromAndroid(fileName?: string, mimeType?: string): Promise<void> }} LookoutApi */
+/** @typedef {{ downloadFile?: (name: string, mimeType: string, base64Data: string) => void, openFile?: (name: string, mimeType: string, base64Data: string) => void, shareFiles?: (namesJson: string, mimeTypesJson: string, base64DataJson: string) => void }} AndroidBridge */
+
+/** @type {Window & { AndroidBridge?: AndroidBridge, Lookout?: LookoutApi, launchQueue?: LaunchQueueLike }} */
+const appWindow = window;
+
+const fileInput = /** @type {HTMLInputElement} */ (
+  document.getElementById("fileInput")
+);
+const downloadAllBtn = /** @type {HTMLButtonElement} */ (
+  document.getElementById("downloadAllBtn")
+);
+const shareAllBtn = /** @type {HTMLButtonElement | null} */ (
+  document.getElementById("shareAllBtn")
+);
+const statusEl = /** @type {HTMLElement} */ (document.getElementById("status"));
+const resultsEl = /** @type {HTMLElement} */ (
+  document.getElementById("results")
+);
+const dropzone = /** @type {HTMLElement} */ (
+  document.getElementById("dropzone")
+);
 const isAndroidApp =
   new URLSearchParams(window.location.search).get("android") === "1";
 const isDevServer = ["127.0.0.1", "localhost"].includes(
@@ -16,9 +44,12 @@ if (isAndroidApp) {
   document.body.classList.add("android-app");
 }
 
+/** @type {File | null} */
 let selectedFile = null;
+/** @type {ExtractedFile[]} */
 let extractedFiles = [];
 
+/** @type {Prefs} */
 const PREF_DEFAULTS = {
   debug_enabled: false,
   attach_raw_mapi: false,
@@ -26,10 +57,17 @@ const PREF_DEFAULTS = {
 };
 
 const PREF_STORAGE_PREFIX = "lookout.pref.";
-const USER_OPTIONS = Object.keys(PREF_DEFAULTS);
+const USER_OPTIONS = /** @type {Array<keyof Prefs>} */ (
+  Object.keys(PREF_DEFAULTS)
+);
 
+/** @type {Prefs} */
 const prefs = { ...PREF_DEFAULTS };
 
+/**
+ * @param {keyof Prefs} name
+ * @returns {boolean}
+ */
 function readPref(name) {
   try {
     const value = localStorage.getItem(`${PREF_STORAGE_PREFIX}${name}`);
@@ -42,6 +80,10 @@ function readPref(name) {
   }
 }
 
+/**
+ * @param {keyof Prefs} name
+ * @param {boolean} value
+ */
 function writePref(name, value) {
   try {
     localStorage.setItem(
@@ -55,7 +97,9 @@ function writePref(name, value) {
 
 function setupPreferences() {
   USER_OPTIONS.forEach((name) => {
-    const checkbox = document.getElementById(`${name}_check`);
+    const checkbox = /** @type {HTMLInputElement | null} */ (
+      document.getElementById(`${name}_check`)
+    );
     if (!checkbox) {
       return;
     }
@@ -65,13 +109,18 @@ function setupPreferences() {
     checkbox.checked = currentValue;
 
     checkbox.addEventListener("change", (event) => {
-      const nextValue = Boolean(event.target.checked);
+      const target = /** @type {HTMLInputElement} */ (event.currentTarget);
+      const nextValue = Boolean(target.checked);
       prefs[name] = nextValue;
       writePref(name, nextValue);
     });
   });
 }
 
+/**
+ * @param {number} size
+ * @returns {string}
+ */
 function formatBytes(size) {
   const units = ["B", "KB", "MB", "GB"];
   let idx = 0;
@@ -83,31 +132,130 @@ function formatBytes(size) {
   return `${val.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
 }
 
+/**
+ * @param {string} message
+ * @param {boolean} [isError=false]
+ */
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
   statusEl.classList.toggle("error", isError);
 }
 
 function hasAndroidShareSupport() {
-  const bridge = window.AndroidBridge;
+  const bridge = appWindow.AndroidBridge;
   return isAndroidApp && bridge && typeof bridge.shareFiles === "function";
 }
 
-function getNormalizedFileName(file) {
-  if (file && file.name === "NaN.html") {
+const MIME_BY_EXTENSION = {
+  avif: "image/avif",
+  bin: "application/octet-stream",
+  bmp: "image/bmp",
+  csv: "text/csv",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  eml: "message/rfc822",
+  gif: "image/gif",
+  htm: "text/html",
+  html: "text/html",
+  ics: "text/calendar",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  json: "application/json",
+  mht: "multipart/related",
+  mhtml: "multipart/related",
+  msg: "application/vnd.ms-outlook",
+  odt: "application/vnd.oasis.opendocument.text",
+  pdf: "application/pdf",
+  png: "image/png",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  rtf: "application/rtf",
+  svg: "image/svg+xml",
+  txt: "text/plain",
+  webp: "image/webp",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xml: "application/xml",
+  zip: "application/zip",
+};
+
+/**
+ * @param {File | null | undefined} file
+ * @returns {string}
+ */
+function fixFilenames(file) {
+  const fileName = (file && file.name) || "attachment.bin";
+  if (fileName === "NaN.html") {
     return "message.html";
   }
-  return (file && file.name) || "attachment.bin";
+  return fileName;
 }
 
+/**
+ * @param {string} fileName
+ * @param {string | undefined} fileType
+ * @returns {string}
+ */
+function guessMimeType(fileName, fileType) {
+  const currentType = (fileType || "").toLowerCase();
+  if (currentType && currentType !== "application/binary") {
+    return fileType;
+  }
+
+  const match = /\.([^.\\/]+)$/.exec(fileName || "");
+  if (!match) {
+    return currentType === "application/binary"
+      ? "application/octet-stream"
+      : fileType || "application/octet-stream";
+  }
+
+  const extension = match[1].toLowerCase();
+  return (
+    MIME_BY_EXTENSION[extension] ||
+    (currentType === "application/binary"
+      ? "application/octet-stream"
+      : fileType || "application/octet-stream")
+  );
+}
+
+/**
+ * @param {File[]} files
+ * @returns {Promise<File[]>}
+ */
+async function reprocessExtractedFiles(files) {
+  const processedFiles = [];
+
+  for (const file of files) {
+    const fileName = fixFilenames(file);
+    const mimeType = guessMimeType(fileName, file && file.type);
+    const bytes = await file.arrayBuffer();
+    processedFiles.push(
+      new File([bytes], fileName, {
+        type: mimeType,
+        lastModified: file.lastModified,
+      }),
+    );
+  }
+
+  return processedFiles;
+}
+
+/**
+ * @param {File} file
+ * @param {number} idx
+ * @returns {boolean}
+ */
 function isFirstMessageHtmlFile(file, idx) {
   if (idx !== 0) {
     return false;
   }
-  const name = getNormalizedFileName(file).toLowerCase();
+  const name = file.name.toLowerCase();
   return name === "message.html";
 }
 
+/**
+ * @returns {File[]}
+ */
 function getSelectedExtractedFiles() {
   return extractedFiles
     .filter((item) => item.selected)
@@ -144,6 +292,9 @@ function resetResults() {
   updateShareAllButtonState();
 }
 
+/**
+ * @param {File[]} files
+ */
 function renderResults(files) {
   resetResults();
 
@@ -155,7 +306,7 @@ function renderResults(files) {
   const frag = document.createDocumentFragment();
   extractedFiles = files.map((file, idx) => {
     const url = URL.createObjectURL(file);
-    const normalizedName = getNormalizedFileName(file);
+    const normalizedName = fixFilenames(file);
     const shouldSelect = !isFirstMessageHtmlFile(file, idx);
 
     const li = document.createElement("li");
@@ -163,7 +314,9 @@ function renderResults(files) {
 
     const selectLabel = document.createElement("label");
     selectLabel.className = "result-select";
-    const checkbox = document.createElement("input");
+    const checkbox = /** @type {HTMLInputElement} */ (
+      document.createElement("input")
+    );
     checkbox.type = "checkbox";
     checkbox.checked = shouldSelect;
     checkbox.setAttribute("aria-label", `Select ${normalizedName}`);
@@ -239,7 +392,8 @@ function renderResults(files) {
     const entry = { file, url, selected: shouldSelect };
 
     checkbox.addEventListener("change", (event) => {
-      entry.selected = Boolean(event.target.checked);
+      const target = /** @type {HTMLInputElement} */ (event.currentTarget);
+      entry.selected = Boolean(target.checked);
       updateDownloadAllButtonState();
       updateShareAllButtonState();
     });
@@ -255,6 +409,9 @@ function renderResults(files) {
   );
 }
 
+/**
+ * @param {File | null} file
+ */
 function setSelectedFile(file) {
   selectedFile = file || null;
   resetResults();
@@ -278,13 +435,22 @@ async function extractFromSelectedFile() {
 
   try {
     const extractor = new TnefExtractor();
+    /**
+     * @type {File[]}
+     */
     const files = await extractor.parse(selectedFile, {}, { ...prefs });
-    renderResults(files || []);
+    const reprocessedFiles = await reprocessExtractedFiles(files || []);
+    renderResults(reprocessedFiles);
   } catch (error) {
     setStatus(`Extraction failed: ${error.message || error}`, true);
   }
 }
 
+/**
+ * @param {string | undefined} fileName
+ * @param {string | undefined} mimeType
+ * @returns {Promise<void>}
+ */
 async function openFromAndroid(fileName, mimeType) {
   try {
     const response = await fetch("./input", { cache: "no-store" });
@@ -306,6 +472,10 @@ async function openFromAndroid(fileName, mimeType) {
   }
 }
 
+/**
+ * @param {File} file
+ * @returns {Promise<string>}
+ */
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -321,38 +491,50 @@ function fileToBase64(file) {
   });
 }
 
+/**
+ * @param {File} file
+ * @returns {Promise<void>}
+ */
 async function saveFileViaAndroid(file) {
   if (
-    !window.AndroidBridge ||
-    typeof window.AndroidBridge.downloadFile !== "function"
+    !appWindow.AndroidBridge ||
+    typeof appWindow.AndroidBridge.downloadFile !== "function"
   ) {
     throw new Error("Android download bridge is unavailable.");
   }
 
   const base64Data = await fileToBase64(file);
-  window.AndroidBridge.downloadFile(
+  appWindow.AndroidBridge.downloadFile(
     file.name || "attachment.bin",
     file.type || "application/octet-stream",
     base64Data,
   );
 }
 
+/**
+ * @param {File} file
+ * @returns {Promise<void>}
+ */
 async function openFileViaAndroid(file) {
   if (
-    !window.AndroidBridge ||
-    typeof window.AndroidBridge.openFile !== "function"
+    !appWindow.AndroidBridge ||
+    typeof appWindow.AndroidBridge.openFile !== "function"
   ) {
     throw new Error("Android open bridge is unavailable.");
   }
 
   const base64Data = await fileToBase64(file);
-  window.AndroidBridge.openFile(
+  appWindow.AndroidBridge.openFile(
     file.name || "attachment.bin",
     file.type || "application/octet-stream",
     base64Data,
   );
 }
 
+/**
+ * @param {File[]} files
+ * @returns {Promise<void>}
+ */
 async function shareFiles(files) {
   if (!files.length) {
     return;
@@ -369,7 +551,7 @@ async function shareFiles(files) {
       base64DataList.push(await fileToBase64(file));
     }
 
-    window.AndroidBridge.shareFiles(
+    appWindow.AndroidBridge.shareFiles(
       JSON.stringify(names),
       JSON.stringify(mimeTypes),
       JSON.stringify(base64DataList),
@@ -406,7 +588,7 @@ async function downloadAll() {
       return;
     }
     a.href = fileEntry.url;
-    a.download = getNormalizedFileName(file) || `attachment-${idx + 1}.bin`;
+    a.download = file.name || `attachment-${idx + 1}.bin`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -449,12 +631,8 @@ async function setupPwaIntegrations() {
     }
   }
 
-  if (
-    "launchQueue" in window &&
-    typeof LaunchParams !== "undefined" &&
-    "files" in LaunchParams.prototype
-  ) {
-    launchQueue.setConsumer(async (launchParams) => {
+  if (appWindow.launchQueue) {
+    appWindow.launchQueue.setConsumer(async (launchParams) => {
       const launchFiles = launchParams.files;
       const handle = launchFiles && launchFiles[0];
       if (!handle) {
@@ -467,7 +645,8 @@ async function setupPwaIntegrations() {
 }
 
 fileInput.addEventListener("change", (event) => {
-  const files = event.target && event.target.files;
+  const target = /** @type {HTMLInputElement} */ (event.currentTarget);
+  const files = target.files;
   setSelectedFile((files && files[0]) || null);
 });
 
@@ -496,6 +675,6 @@ setupPreferences();
 setupPwaIntegrations();
 updateShareAllButtonState();
 
-window.Lookout = {
+appWindow.Lookout = {
   openFromAndroid,
 };

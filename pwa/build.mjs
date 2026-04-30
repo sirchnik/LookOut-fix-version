@@ -1,3 +1,7 @@
+/// <reference types="node" />
+
+// @ts-check
+
 import {
   mkdir,
   copyFile,
@@ -14,6 +18,14 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname));
 const dist = path.join(root, "dist");
 const watchMode = process.argv.includes("--watch");
 
+/**
+ * @typedef {Object} CopySpec
+ * @property {string} src
+ * @property {string} dest
+ * @property {[string, string]=} replace
+ */
+
+/** @type {(CopySpec | [string, string])[]} */
 const filesToCopy = [
   ["index.html", "index.html"],
   ["styles.css", "styles.css"],
@@ -22,11 +34,7 @@ const filesToCopy = [
   ["screenshots/", "screenshots/"],
   ["../src/scripts/mapi_props.js", "mapi_props.js"],
   ["../src/icons/", "icons/"],
-  {
-    src: "app.js",
-    dest: "app.js",
-    replace: ["../src/scripts/lookout.mjs", "./scripts/lookout.mjs"],
-  },
+  ["app.js", "app.js"],
   {
     src: "../src/scripts/lookout.mjs",
     dest: "scripts/lookout.mjs",
@@ -35,20 +43,47 @@ const filesToCopy = [
   ["../src/scripts/tnef.mjs", "scripts/tnef.mjs"],
 ];
 
+/**
+ * @param {CopySpec | [string, string]} file
+ * @returns {string}
+ */
+function getCopySource(file) {
+  return Array.isArray(file) ? file[0] : file.src;
+}
+
+/**
+ * @param {CopySpec | [string, string]} file
+ * @returns {string}
+ */
+function getCopyDest(file) {
+  return Array.isArray(file) ? file[1] : file.dest;
+}
+
+/**
+ * @param {CopySpec | [string, string]} file
+ * @returns {[string, string] | undefined}
+ */
+function getCopyReplace(file) {
+  return Array.isArray(file) ? undefined : file.replace;
+}
+
+/** @type {string[]} */
 const watchTargets = filesToCopy.map((file) =>
-  path.join(root, file.src || file[0]),
+  path.join(root, getCopySource(file)),
 );
 
+/** @returns {Promise<void>} */
 async function build() {
   // await rm(dist, { recursive: true, force: true });
 
   for (const file of filesToCopy) {
-    const src = path.join(root, file.src || file[0]);
-    const dest = path.join(dist, file.dest || file[1]);
+    const src = path.join(root, getCopySource(file));
+    const dest = path.join(dist, getCopyDest(file));
+    const replace = getCopyReplace(file);
     await mkdir(path.dirname(dest), { recursive: true });
-    if (file.replace) {
+    if (replace) {
       let content = await readFile(src, "utf8");
-      content = content.replaceAll(file.replace[0], file.replace[1]);
+      content = content.replaceAll(replace[0], replace[1]);
       await writeFile(dest, content, "utf8");
     } else {
       const srcStat = await stat(src);
@@ -62,6 +97,11 @@ async function build() {
   console.log("Build complete.");
 }
 
+/**
+ * @param {string} src
+ * @param {string} dest
+ * @returns {Promise<void>}
+ */
 async function copyRecursive(src, dest) {
   const srcStat = await stat(src);
   if (srcStat.isDirectory()) {
@@ -77,9 +117,11 @@ async function copyRecursive(src, dest) {
   }
 }
 
+/** @returns {Promise<void>} */
 async function watch() {
   let rebuilding = false;
   let pending = false;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
   let rebuildTimeout;
 
   const triggerRebuild = async () => {

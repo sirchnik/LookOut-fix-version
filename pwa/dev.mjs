@@ -1,3 +1,7 @@
+/// <reference types="node" />
+
+// @ts-check
+
 import { access, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -14,6 +18,10 @@ const certDir = path.join(root, ".cert");
 const certPath = path.join(certDir, "localhost-cert.pem");
 const keyPath = path.join(certDir, "localhost-key.pem");
 
+/**
+ * @param {string} filePath
+ * @returns {Promise<boolean>}
+ */
 async function exists(filePath) {
   try {
     await access(filePath, fsConstants.F_OK);
@@ -23,6 +31,12 @@ async function exists(filePath) {
   }
 }
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {import("node:child_process").SpawnOptions} [options]
+ * @returns {Promise<void>}
+ */
 function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -44,6 +58,7 @@ function runCommand(command, args, options = {}) {
   });
 }
 
+/** @returns {Promise<void>} */
 async function ensureCertificate() {
   if ((await exists(certPath)) && (await exists(keyPath))) {
     return;
@@ -79,6 +94,10 @@ async function ensureCertificate() {
   }
 }
 
+/**
+ * @param {number} [timeoutMs=15000]
+ * @returns {Promise<void>}
+ */
 async function waitForInitialBuild(timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   const indexPath = path.join(dist, "index.html");
@@ -96,14 +115,15 @@ async function waitForInitialBuild(timeoutMs = 15000) {
   );
 }
 
+/** @returns {import("node:child_process").ChildProcess} */
 function startBuildWatcher() {
   return spawn(process.execPath, [path.join(root, "build.mjs"), "--watch"], {
     cwd: root,
     stdio: "inherit",
-    stdout: "inherit",
   });
 }
 
+/** @returns {Promise<void>} */
 async function main() {
   await ensureCertificate();
 
@@ -111,7 +131,7 @@ async function main() {
   let shuttingDown = false;
 
   const shutdown = () => {
-    if (shuttingown) {
+    if (shuttingDown) {
       return;
     }
     shuttingDown = true;

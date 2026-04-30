@@ -1,3 +1,4 @@
+//@ts-nocheck
 /*
  * File: tnef.js
  *   Extract files and metadata TNEF/MAPI format

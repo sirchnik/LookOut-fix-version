@@ -1,4 +1,10 @@
+// @ts-check
+
+/** @type {any} */
+const serviceWorker = self;
+
 const CACHE_VERSION = "lookout-pwa-v1";
+/** @type {string[]} */
 const ASSETS = [
   "./",
   "./index.html",
@@ -13,14 +19,20 @@ const ASSETS = [
   "./icons/LOicon-64.png",
 ];
 
-self.addEventListener("install", (event) => {
+/**
+ * @param {any} event
+ */
+serviceWorker.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_VERSION).then((cache) => cache.addAll(ASSETS)),
   );
-  self.skipWaiting();
+  serviceWorker.skipWaiting();
 });
 
-self.addEventListener("activate", (event) => {
+/**
+ * @param {any} event
+ */
+serviceWorker.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
@@ -32,16 +44,19 @@ self.addEventListener("activate", (event) => {
         ),
       ),
   );
-  self.clients.claim();
+  serviceWorker.clients.claim();
 });
 
-self.addEventListener("fetch", (event) => {
+/**
+ * @param {any} event
+ */
+serviceWorker.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") {
     return;
   }
 
   const requestUrl = new URL(event.request.url);
-  if (requestUrl.origin !== self.location.origin) {
+  if (requestUrl.origin !== serviceWorker.location.origin) {
     return;
   }
 

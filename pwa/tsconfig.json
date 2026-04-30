@@ -1,0 +1,33 @@
+{
+    "compilerOptions": {
+        "allowJs": true,
+        "checkJs": true,
+        "noEmit": true,
+        "paths": {
+            "/scripts/*": [
+                "../src/scripts/*"
+            ]
+        },
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "target": "ES2022",
+        "lib": [
+            "ES2022",
+            "DOM"
+        ],
+        "types": [
+            "node",
+        ],
+        "skipLibCheck": true,
+        "strict": false
+    },
+    "include": [
+        "./*.d.ts",
+        "./*.js",
+        "./*.mjs"
+    ],
+    "exclude": [
+        "./dist",
+        "./node_modules",
+    ]
+}
